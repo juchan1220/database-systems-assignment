@@ -29,7 +29,7 @@ SELECt MAX(level) FROM CatchedPokemon WHERE owner_id = (SELECT id FROM Trainer W
 SELECT DISTINCT hometown FROM Trainer ORDER BY hometown;
 
 # 11
-SELECT Trainer.name, CatchedPokemon.nickname FROM Trainer, CatchedPokemon WHERE CatchedPokemon.id = Trainer.id AND CatchedPokemon.nickname LIKE "A%" ORDER BY Trainer.name;
+SELECT Trainer.name, CatchedPokemon.nickname FROM Trainer, CatchedPokemon WHERE CatchedPokemon.owner_id = Trainer.id AND CatchedPokemon.nickname LIKE "A%" ORDER BY Trainer.name;
 
 # 12
 SELECT Trainer.name FROM Gym JOIN Trainer ON Gym.leader_id = Trainer.id WHERE city IN (SELECT name FROM City WHERE description = "Amazon");
