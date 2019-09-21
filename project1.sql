@@ -115,7 +115,7 @@ ORDER BY Trainer.name, Pokemon.name;
 # 26
 SELECT Pokemon.name FROM Evolution AS EV1
 JOIN Pokemon ON EV1.before_id = Pokemon.id
-WHERE NOT EXISTS (SELECT * FROM Evolution AS EV2 WHERE EV2.before_id = EV1.after_id)
+WHERE NOT EXISTS (SELECT * FROM Evolution AS EV2 WHERE EV2.before_id = EV1.after_id) AND NOT EXISTS (SELECT * FROM Evolution AS EV3 WHERE EV3.after_id = EV1.before_id)
 ORDER BY Pokemon.name;
 
 # 27
@@ -126,7 +126,7 @@ ORDER BY CatchedPokemon.nickname;
 
 # 28
 SELECT Trainer.name FROM Trainer
-WHERE (SELECT COUNT(*) FROM CatchedPokemon WHERE CatchedPokemon.owner_id = Trainer.id) >= 3
+WHERE (SELECT COUNT(*) FROM CatchedPokemon JOIN Evolution ON Evolution.after_id = CatchedPokemon.pid WHERE CatchedPokemon.owner_id = Trainer.id) >= 3
 ORDER BY Trainer.name;
 
 # 29 
