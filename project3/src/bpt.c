@@ -52,10 +52,6 @@ pagenum_t find_leaf(int64_t key)
 
 	cur = buffer_read_page(selected_table, 0);
 
-	if (selected_table == 2 && key == 17413) {
-		printf("BREAK");
-	}
-
 	// Empty Tree
 	if (cur->rootpage == 0) {
 #ifdef DEBUG
