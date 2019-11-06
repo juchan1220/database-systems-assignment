@@ -83,11 +83,6 @@ pagenum_t find_leaf(int64_t key)
 
 	buffer_unpin_page(selected_table, cur_num);
 
-	if (selected_table == 2 && key == 17413) {
-		cur = buffer_read_page(selected_table, cur_num);
-		buffer_unpin_page(selected_table, cur_num);
-	}
-
 	return cur_num;
 }
 
