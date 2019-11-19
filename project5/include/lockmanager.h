@@ -69,7 +69,7 @@ struct trx_t
 extern int trx_cnt;
 extern std::mutex trx_mtx;
 extern std::unordered_map<int, trx_t> trx_map;
-extern std::unordered_map< std::pair<int, pagenum_t>, lock_t*, ptpHasher> lock_map;
+extern std::unordered_map<ptp, std::pair<lock_t*, lock_t*>, ptpHasher> lock_map;
 
 
 /// <summary>
