@@ -307,4 +307,3 @@ int end_trx(int tid)
 {
 	return delete_trx(tid);
 }
-

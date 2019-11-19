@@ -5,6 +5,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <algorithm>
+#include <condition_variable>
 
 
 // table id, page number pair
@@ -36,6 +37,7 @@ enum trx_state
 struct lock_t
 {
 	int table_id;
+	pagenum_t page_num;
 	int64_t key;
 
 	lock_mode mode;
@@ -52,6 +54,8 @@ struct lock_t
 	// transaction id
 	int trx_id;
 
+	std::condition_variable lock_cv;
+
 	lock_t() : table_id(-1), key(-1), mode(MODE_SHARED), page_prev(nullptr), page_next(nullptr), trx_next(nullptr), trx_id(-1) {};
 };
 
@@ -62,13 +66,16 @@ struct trx_t
 	lock_t* trx_locks;
 	lock_t* wait_lock;
 
-	trx_t() : trx_id(-1), state(STATE_IDLE), trx_locks(nullptr), wait_lock(nullptr) {};
+	trx_t() : trx_id(-1), state(STATE_RUNNING), trx_locks(nullptr), wait_lock(nullptr) {};
 };
 
 
 extern int trx_cnt;
 extern std::mutex trx_mtx;
 extern std::unordered_map<int, trx_t> trx_map;
+extern std::condition_variable lock_cv;
+
+// first lock_t is head, second lock_t is tail
 extern std::unordered_map<ptp, std::pair<lock_t*, lock_t*>, ptpHasher> lock_map;
 
 
