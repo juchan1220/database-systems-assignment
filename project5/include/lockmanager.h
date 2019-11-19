@@ -38,7 +38,7 @@ struct lock_t
 	int table_id;
 	int64_t key;
 
-	enum lock_mode mode;
+	lock_mode mode;
 
 	// same page prev lock
 	lock_t* page_prev;
@@ -58,7 +58,7 @@ struct lock_t
 struct trx_t
 {
 	int trx_id;
-	enum trx_state state;
+	trx_state state;
 	lock_t* trx_locks;
 	lock_t* wait_lock;
 
