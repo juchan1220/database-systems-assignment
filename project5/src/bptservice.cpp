@@ -300,10 +300,11 @@ int join_table(int table_id_1, int table_id_2, char* pathname)
 
 int begin_trx(void)
 {
-
+	return alloc_trx();
 }
 
 int end_trx(int tid)
 {
-	return 0;
+	return delete_trx(tid);
 }
+
