@@ -18,9 +18,14 @@ int alloc_trx()
 
 int delete_trx(int tid)
 {
+    int ret = 0;
+    
 	trx_mtx.lock();
 
-	trx_map.erase(tid);
+	if(trx_map.find(tid) != trx_map.end())
+	    trx_map.erase(tid);
+	else
+	    ret = -1;
 	
 	trx_mtx.unlock();
 
