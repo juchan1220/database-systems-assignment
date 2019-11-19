@@ -1,9 +1,24 @@
 #ifndef __LOCKMANAGER_H__
 #define __LOCKMANAGER_H__
 
+#include "bpt.h"
 #include <mutex>
 #include <unordered_map>
 #include <algorithm>
+
+
+// table id, page number pair
+typedef std::pair<int, pagenum_t> ptp;
+
+struct ptpHasher
+{
+	std::size_t operator()(const ptp& k) const {
+		size_t ret = 23;
+		ret = ret * 37 + std::hash<int>()(k.first);
+		ret = ret * 37 + std::hash<pagenum_t>()(k.second);
+		return ret;
+	}
+};
 
 enum lock_mode
 {
@@ -13,10 +28,11 @@ enum lock_mode
 
 enum trx_state
 {
-	STATE_IDLE,
+	STATE_IDLE ,
 	STATE_RUNNING,
 	STATE_WAITING
 };
+
 struct lock_t
 {
 	int table_id;
@@ -53,6 +69,7 @@ struct trx_t
 extern int trx_cnt;
 extern std::mutex trx_mtx;
 extern std::unordered_map<int, trx_t> trx_map;
+extern std::unordered_map< std::pair<int, pagenum_t>, lock_t*, ptpHasher> lock_map;
 
 
 /// <summary>
