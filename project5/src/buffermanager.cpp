@@ -640,7 +640,7 @@ bool buffer_page_try_lock(int table_id, pagenum_t pagenum)
 	}
 
 	if (buffer[idx].buffer_page_mtx.try_lock()) {
-		// Page Latch¸¦ È¹µæÇÏ°í pin count¸¦ ¼öÁ¤
+		// Page Latchë¥¼ íšë“í•˜ê³  pin countë¥¼ ìˆ˜ì •
 
 		buffer_pin_mtx.lock();
 
@@ -658,20 +658,15 @@ void buffer_page_unlock(int table_id, pagenum_t pagenum)
 {
 	int idx = buffer_find_page(table_id, pagenum);
 
-	// try_lock ¿¡¼­ pinÀ» ¹Ú¾ÒÀ¸¹Ç·Î buffer¿¡¼­ »ç¶óÁ®¼­´Â ¾ÈµÊ
+	// try_lock ì—ì„œ pinì„ ë°•ì•˜ìœ¼ë¯€ë¡œ bufferì—ì„œ ì‚¬ë¼ì ¸ì„œëŠ” ì•ˆë¨
 	if (idx == -1) {
 		printf("Error: Tried to unlock latch of not exist page. Something goes wrong...");
 		exit(EXIT_FAILURE);
 	}
 
-	// ÀÌ ½ÃÁ¡¿¡¼­ buffer pool latch¸¦ ¼ÒÀ¯ÇÏ°í ÀÖÁö ¾Ê±â ¶§¹®¿¡ pinÀ» Á¶Á¤ÇÏ±â À§ÇÑ mutex°¡ ÇÊ¿ä
-	buffer_pin_mtx.lock();
-	buffer[idx].is_pinned--;
-	buffer_pin_mtx.unlock();
-
 	buffer[idx].buffer_page_mtx.unlock();
 
-	// ÀÌÁ¦ºÎÅÍ evict µÇ¾îµµ µÊ
+	// ì´ì œë¶€í„° evict ë˜ì–´ë„ ë¨
 	buffer_unpin_page(table_id, pagenum);
 
 	return;
