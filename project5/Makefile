@@ -1,6 +1,6 @@
 .SUFFIXES: .c .o
 
-CC=gcc
+CC=g++
 
 SRCDIR=src/
 INC=include/
@@ -29,7 +29,7 @@ OBJ_FILE_MANAGER:=$(SRCDIR)filemanager.o
 OBJ_BUFFER_MANAGER:=$(SRCDIR)buffermanager.o
 OBJ_LOCK_MANAGER:=$(SRCDIR)lockmanager.o
 
-CFLAGS+= -g -fPIC -I $(INC)
+CFLAGS+= -O2 -std=c++14 -pthread -fPIC -I $(INC)
 
 TARGET=main
 

@@ -2,7 +2,9 @@
 #define __LOCKMANAGER_H__
 
 #include "bpt.h"
+#include "buffermanager.h"
 #include <mutex>
+#include <list>
 #include <unordered_map>
 #include <algorithm>
 #include <condition_variable>
@@ -11,82 +13,123 @@
 // table id, page number pair
 typedef std::pair<int, pagenum_t> ptp;
 
+
+struct Lock;
+struct Transaction;
+
 struct ptpHasher
 {
 	std::size_t operator()(const ptp& k) const {
-		size_t ret = 23;
-		ret = ret * 37 + std::hash<int>()(k.first);
-		ret = ret * 37 + std::hash<pagenum_t>()(k.second);
+		size_t ret = 1009;
+		ret = ret * 1009 + std::hash<int>()(k.first);
+		ret = ret * 1009 + std::hash<pagenum_t>()(k.second);
 		return ret;
 	}
 };
 
-enum lock_mode
+enum class LockMode
 {
 	MODE_SHARED,
 	MODE_EXCLUSIVE
 };
 
-enum trx_state
+enum class TransactionState
 {
-	STATE_IDLE ,
+	STATE_IDLE,
 	STATE_RUNNING,
 	STATE_WAITING
 };
 
-struct lock_t
+enum class LockResult
+{
+	SUCCESS,
+	CONFLICT,
+	DEADLOCK
+};
+
+struct Undo
+{
+	int table_id;
+	int64_t key;
+	record* oldValue;
+};
+
+struct Lock
 {
 	int table_id;
 	pagenum_t page_num;
 	int64_t key;
 
-	lock_mode mode;
+	Transaction* trx;
+
+	LockMode mode;
 
 	// same page prev lock
-	lock_t* page_prev;
+	Lock* page_prev;
 
 	// same page next lock
-	lock_t* page_next;
+	Lock* page_next;
 
-	// same trx next lock
-	lock_t* trx_next;
-
-	// transaction id
-	int trx_id;
-
-	std::condition_variable lock_cv;
-
-	lock_t() : table_id(-1), key(-1), mode(MODE_SHARED), page_prev(nullptr), page_next(nullptr), trx_next(nullptr), trx_id(-1) {};
+	bool acquired;
 };
 
-struct trx_t
+struct Transaction
 {
 	int trx_id;
-	trx_state state;
-	lock_t* trx_locks;
-	lock_t* wait_lock;
+	
+	TransactionState trx_state;
+	std::list<Lock*> acquired_locks;
 
-	trx_t() : trx_id(-1), state(STATE_RUNNING), trx_locks(nullptr), wait_lock(nullptr) {};
+	std::condition_variable trx_cond;
+	std::mutex trx_mtx;
+
+	int wait_this_cnt;
+
+	Lock* wait_lock;
+
+	std::list<Undo> undo_list;
+	
+	Transaction(int tid) : trx_id(tid), trx_state(TransactionState::STATE_IDLE), wait_lock(nullptr), wait_this_cnt(0) {};
 };
 
+struct TransactionManager
+{
+	std::unordered_map<int, Transaction*> trx_table;
+	int next_trx_id;
+	std::mutex trx_mtx;
+};
 
-extern int trx_cnt;
-extern std::mutex trx_mtx;
-extern std::unordered_map<int, trx_t> trx_map;
-extern std::condition_variable lock_cv;
+struct LockManager
+{
+	// first lock_t is head, second lock_t is tail
+	std::unordered_map<ptp, std::pair<Lock*, Lock*>, ptpHasher> lockTable;
 
-// first lock_t is head, second lock_t is tail
-extern std::unordered_map<ptp, std::pair<lock_t*, lock_t*>, ptpHasher> lock_map;
+	std::mutex lock_mtx;
+};
+
+extern TransactionManager trxManager;
+extern LockManager lockManager;
+
 
 
 /// <summary>
 /// Allocate transaction structure and initialize it
 /// </summary>
-int alloc_trx();
+int lock_alloc_trx();
 
 /// <summary>
 /// Clean up the transaction with given tid and its related information
 /// </summary>
-int delete_trx(int tid);
+int lock_delete_trx(int tid);
+
+bool lock_trx_exist(int tid);
+
+LockResult lock_record_lock(int table_id, pagenum_t pagenum, int64_t key, LockMode mode, int tid);
+
+pagenum_t lock_buffer_page_lock(int table_id, int64_t key);
+
+bool lock_conflict_recheck(int table_id, pagenum_t pagenum, int64_t key, LockMode mode, int tid);
+
+void lock_abort_trx(int tid);
 
 #endif

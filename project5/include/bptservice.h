@@ -57,4 +57,14 @@ int begin_trx(void);
 /// </summary>
 int end_trx(int tid);
 
+/// <summary>
+/// Read values in the table with matching key for this transaction
+/// </summary>
+int db_find(int table_id, int64_t key, char* ret_val, int trx_id);
+
+/// <summary>
+/// Find the matching key and modify the values
+/// </summary>
+int db_update(int table_id, int64_t key, char* values, int trx_id);
+
 #endif

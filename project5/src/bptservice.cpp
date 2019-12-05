@@ -53,6 +53,11 @@ int close_table(int table_id)
 /// <returns> return 0 if success. Non-zero value otherwise </returns>
 int db_insert(int table_id, int64_t key, char* value)
 {
+	// does not support insert with Transaction
+	if (trxManager.trx_table.empty() == false) {
+		return -1;
+	}
+
 	record* find_ret;
 	page_t* cur;
 	pagenum_t leaf_num;
@@ -154,6 +159,11 @@ int db_find(int table_id, int64_t key, char* ret_val)
 /// <returns> If success, return 0. Otherwise, return non-zero value. </returns>
 int db_delete(int table_id, int64_t key)
 {
+	// does not support delete with Transaction
+	if (trxManager.trx_table.empty() == false) {
+		return -1;
+	}
+
 	record* find_ret;
 	pagenum_t find_leaf_ret;
 
@@ -209,6 +219,8 @@ int join_table(int table_id_1, int table_id_2, char* pathname)
 #endif
 		return -1;
 	}
+
+	buffer_pool_lock();
 
 	FILE* res;
 	pagenum_t table1_page_num, table2_page_num, tmp_num;
@@ -295,15 +307,207 @@ int join_table(int table_id_1, int table_id_2, char* pathname)
 		}
 	}
 
+	buffer_pool_unlock();
+
 	return 0;
 }
 
 int begin_trx(void)
 {
-	return alloc_trx();
+	return lock_alloc_trx();
 }
 
 int end_trx(int tid)
 {
-	return delete_trx(tid);
+	return lock_delete_trx(tid);
 }
+
+int db_find(int table_id, int64_t key, char* ret_val, int trx_id)
+{
+	pagenum_t pagenum;
+
+	// not exist transaction
+	if (!lock_trx_exist(trx_id)) {
+#ifdef DEBUG
+		printf("db_find: Not Exist Transaction.\n");
+#endif
+		return 1;
+	}
+
+	trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_RUNNING;
+
+	// table is not opened
+	if (buffer_is_table_opened(table_id) == 0) {
+#ifdef DEBUG
+		printf("db_find: table is not opened.\n");
+#endif
+		return 2;
+	}
+
+	// Key Existence Check
+	{
+		buffer_pool_lock();
+
+		record* find_ret = find(key);
+		if (find_ret == nullptr) {
+			// not exist key
+			return 3;
+		}
+		else {
+			free(find_ret);
+		}
+
+		buffer_pool_unlock();
+	}
+
+	// Get Buffer Page Latch
+	pagenum = lock_buffer_page_lock(table_id, key);
+
+	LockResult ret = lock_record_lock(table_id, pagenum, key, LockMode::MODE_SHARED, trx_id);
+
+	if (ret == LockResult::DEADLOCK) {
+		// Deadlock
+		printf("db_find: deadlock detected.\n");
+
+		buffer_page_unlock(table_id, pagenum);
+
+		lock_abort_trx(trx_id);
+		return 4;
+	}
+	else if (ret == LockResult::CONFLICT) {
+		do {
+			buffer_page_unlock(table_id, pagenum);
+			std::unique_lock<std::mutex> lck(trxManager.trx_table[trx_id]->wait_lock->trx->trx_mtx);
+			trxManager.trx_table[trx_id]->wait_lock->trx->trx_cond.wait(lck);
+
+			trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_RUNNING;
+			trxManager.trx_table[trx_id]->wait_lock->trx->wait_this_cnt--;
+			
+			pagenum = lock_buffer_page_lock(table_id, key);
+
+			Lock* before_waited_lock = trxManager.trx_table[trx_id]->wait_lock;
+
+			// CONFLICT가 있는지 다시 확인
+			bool ret_recheck = lock_conflict_recheck(table_id, pagenum, key, LockMode::MODE_SHARED, trx_id);
+
+			// 이 Lock이 기다리고 있던 Trx를 기다리고 있던 Lock들의 wait_lock 재정리가 모두 끝났을 때
+			if (before_waited_lock->trx->wait_this_cnt == 0) {
+				before_waited_lock->trx->trx_cond.notify_all();
+			}
+
+			// 없으면 탈출
+			if (ret_recheck) break;
+
+		} while (true);
+	}
+
+	page_t *page = buffer_read_page(table_id, pagenum);
+
+	for (int i = 0; i < page->num_keys; i++) {
+		if (page->keys[i] == key) {
+			memcpy(ret_val, &(((record*)(page->pointers))[i].value), VALUE_SIZE);
+			break;
+		}
+	}
+
+	buffer_unpin_page(table_id, pagenum);
+	buffer_page_unlock(table_id, pagenum);
+
+	trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_IDLE;
+
+	return 0;
+}
+
+int db_update(int table_id, int64_t key, char* values, int trx_id)
+{
+	pagenum_t pagenum;
+
+	// not exist transaction
+	if (!lock_trx_exist(trx_id)) {
+		return 1;
+	}
+
+	trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_RUNNING;
+
+	// table is not opened
+	if (buffer_is_table_opened(table_id) == 0) {
+		return 2;
+	}
+
+	// Key Existence Check
+	{
+		buffer_pool_lock();
+
+		record* find_ret = find(key);
+		if (find_ret == nullptr) {
+			// not exist key
+			return 3;
+		}
+		else {
+			free(find_ret);
+		}
+
+		buffer_pool_unlock();
+	}
+
+	// Get Buffer Page Latch
+	pagenum = lock_buffer_page_lock(table_id, key);
+
+	LockResult ret = lock_record_lock(table_id, pagenum, key, LockMode::MODE_EXCLUSIVE, trx_id);
+
+	if (ret == LockResult::DEADLOCK) {
+		// Deadlock
+
+#ifdef DEBUG
+		printf("db_update: deadlock detected!\n");
+#endif
+
+		buffer_page_unlock(table_id, pagenum);
+
+		lock_abort_trx(trx_id);
+		return 4;
+	}
+	else if (ret == LockResult::CONFLICT) {
+		do {
+			buffer_page_unlock(table_id, pagenum);
+			std::unique_lock<std::mutex> lck(trxManager.trx_table[trx_id]->wait_lock->trx->trx_mtx);
+			trxManager.trx_table[trx_id]->wait_lock->trx->trx_cond.wait(lck);
+
+			trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_RUNNING;
+			trxManager.trx_table[trx_id]->wait_lock->trx->wait_this_cnt--;
+			
+			pagenum = lock_buffer_page_lock(table_id, key);
+
+			Lock* before_waited_lock = trxManager.trx_table[trx_id]->wait_lock;
+
+			// CONFLICT가 있는지 다시 확인
+			bool ret_recheck = lock_conflict_recheck(table_id, pagenum, key, LockMode::MODE_EXCLUSIVE, trx_id);
+			
+			// 이 Lock이 기다리고 있던 Trx를 기다리고 있던 Lock들의 wait_lock 재정리가 모두 끝났을 때
+			if (before_waited_lock->trx->wait_this_cnt == 0) {
+				before_waited_lock->trx->trx_cond.notify_all();
+			}
+
+			// 없으면 탈출
+			if (ret_recheck) break;
+
+		} while (true);
+	}
+
+	page_t *page = buffer_read_page(table_id, pagenum);
+
+	for (int i = 0; i < page->num_keys; i++) {
+		if (page->keys[i] == key) {
+			memcpy(&(((record*)(page->pointers))[i].value), values, VALUE_SIZE);
+			break;
+		}
+	}
+
+	buffer_unpin_page(table_id, pagenum);
+	buffer_page_unlock(table_id, pagenum);
+
+	trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_IDLE;
+
+	return 0;
+}
+

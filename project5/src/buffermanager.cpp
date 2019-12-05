@@ -2,15 +2,14 @@
 
 
 // Buffer
-bufferFrame* buffer;
+bufferFrame* buffer = nullptr;
 unsigned int bufffer_size = 0;
 unsigned int buffer_capacity = 0;
 int clock_hand = 0;
 hashBucket** hash_table;
 
-// Buffer for header
-page_t headers[MAX_TABLE + 5];
-
+std::mutex buffer_pool_mtx;
+std::mutex buffer_pin_mtx;
 
 /// <summary>
 /// Initialize buffer pool with given number and buffer manager
@@ -21,6 +20,11 @@ int buffer_init(int buf_num)
 {
 	int i;
 
+	// does not support resize buffer
+	if (buffer != nullptr) {
+		return -1;
+	}
+
 	// Invalid Buffer Size
 	if(buf_num <= 0){
 		return -1;
@@ -29,7 +33,7 @@ int buffer_init(int buf_num)
 	buffer_capacity = buf_num;
 	bufffer_size = 0;
 
-	buffer = (bufferFrame *)malloc(sizeof(bufferFrame) * buffer_capacity);
+	buffer = new bufferFrame[buffer_capacity];
 	hash_table = (hashBucket **)malloc(sizeof(hashBucket*) * buffer_capacity);
 
 	if (buffer == NULL || hash_table == NULL) {
@@ -141,7 +145,7 @@ pagenum_t buffer_alloc_page(int table_id)
 {
 	int cnt = 0;
 	page_t* freepage;
-	page_t* header = &headers[table_id];
+	page_t* header;
 	pagenum_t freepage_num;
 
 	// Invalid Table id
@@ -151,6 +155,8 @@ pagenum_t buffer_alloc_page(int table_id)
 #endif
 		exit(EXIT_FAILURE);
 	}
+
+	header = buffer_read_page(table_id, 0);
 
 	// does not have free page
 	if (header->freepage == 0) {
@@ -162,6 +168,8 @@ pagenum_t buffer_alloc_page(int table_id)
 		header->freepage = freepage->parent;
 		buffer_unpin_page(table_id, freepage_num);
 	}
+	
+	buffer_set_dirty_page(table_id, 0);
 
 	// before 2 rotate
 	while (cnt <= 2LL * buffer_capacity) {
@@ -229,6 +237,9 @@ pagenum_t buffer_alloc_page(int table_id)
 	// advance clock
 	clock_hand = (clock_hand + 1) % buffer_capacity;
 
+	// header unpin
+	buffer_unpin_page(table_id, 0);
+
 	return freepage_num;
 }
 
@@ -240,7 +251,7 @@ pagenum_t buffer_alloc_page(int table_id)
 void buffer_free_page(int table_id, pagenum_t pagenum)
 {
 	page_t* cur;
-	page_t* header = &headers[table_id];
+	page_t* header;
 	pagenum_t freepage_num;
 
 	// Invalid table id
@@ -251,9 +262,13 @@ void buffer_free_page(int table_id, pagenum_t pagenum)
 		exit(EXIT_FAILURE);
 	}
 
+	header = buffer_read_page(table_id, 0);
+
 	// Set first free page into page number of new free page
 	freepage_num = header->freepage;
 	header->freepage = pagenum;
+
+	buffer_set_dirty_page(table_id, 0);
 
 	cur = buffer_read_page(table_id, pagenum);
 
@@ -266,6 +281,8 @@ void buffer_free_page(int table_id, pagenum_t pagenum)
 
 	buffer_set_dirty_page(table_id, pagenum);
 	buffer_unpin_page(table_id, pagenum);
+
+	buffer_unpin_page(table_id, 0);
 
 	return;
 }
@@ -304,7 +321,7 @@ int buffer_find_page(int table_id, pagenum_t pagenum)
 /// <param name="table_id"> table id </param>
 /// <param name="pagenum"> page number </param>
 /// <returns> page pointer </returns>
-page_t* buffer_read_page(int table_id, pagenum_t pagenum)
+page_t* buffer_read_page(int table_id, pagenum_t pagenum, bool countPin)
 {
 	uint64_t cnt = 0;
 
@@ -314,17 +331,17 @@ page_t* buffer_read_page(int table_id, pagenum_t pagenum)
 #endif
 		exit(EXIT_FAILURE);
 	}
-	// Special Case: Header
-	if (pagenum == 0) {
-		return &(headers[table_id]);
-	}
 
 	int idx = buffer_find_page(table_id, pagenum);
 
 	// Already exists in buffer
 	if (idx != -1) {
 		// count 1 more pin
-		buffer[idx].is_pinned++;
+
+		buffer_pin_mtx.lock();
+		if(countPin) buffer[idx].is_pinned++;
+		buffer_pin_mtx.unlock();
+
 		buffer[idx].is_refered = 1;
 		return &(buffer[idx].page);
 	}
@@ -373,7 +390,7 @@ page_t* buffer_read_page(int table_id, pagenum_t pagenum)
 	buffer[clock_hand].table_id = table_id;
 	buffer[clock_hand].page_num = pagenum;
 	buffer[clock_hand].is_dirty = 0;
-	buffer[clock_hand].is_pinned = 1;
+	buffer[clock_hand].is_pinned = countPin ? 1 : 0;
 	buffer[clock_hand].is_refered = 1;
 	buffer[clock_hand].is_alloc = 1;
 
@@ -427,7 +444,11 @@ void buffer_unpin_page(int table_id, pagenum_t pagenum)
 		exit(EXIT_FAILURE);
 	}
 
+	buffer_pin_mtx.lock();
+
 	buffer[idx].is_pinned--;
+
+	buffer_pin_mtx.unlock();
 
 	return;
 }
@@ -477,9 +498,6 @@ int buffer_open_table(const char* pathname)
 	if (table_id < 0) {
 		return -1;
 	}
-
-	// Read header into buffer
-	file_read_page(table_id, 0, &headers[table_id]);
 
 	return table_id;
 }
@@ -586,7 +604,7 @@ int buffer_destory()
 		}
 	}
 
-	free(buffer);
+	delete[] buffer;
 
 	return 0;
 }
@@ -601,3 +619,60 @@ int buffer_is_table_opened(int table_id)
 	return file_is_table_opened(table_id);
 }
 
+void buffer_pool_lock()
+{
+	buffer_pool_mtx.lock();
+}
+
+void buffer_pool_unlock()
+{
+	buffer_pool_mtx.unlock();
+}
+
+bool buffer_page_try_lock(int table_id, pagenum_t pagenum)
+{
+	int idx = buffer_find_page(table_id, pagenum);
+
+	// not exist in buffer
+	if (idx == -1) {
+		buffer_read_page(table_id, pagenum, false);
+		idx = buffer_find_page(table_id, pagenum);
+	}
+
+	if (buffer[idx].buffer_page_mtx.try_lock()) {
+		// Page Latch를 획득하고 pin count를 수정
+
+		buffer_pin_mtx.lock();
+
+		buffer[idx].is_pinned++;
+
+		buffer_pin_mtx.unlock();
+
+		return true;
+	}
+
+	return false;
+}
+
+void buffer_page_unlock(int table_id, pagenum_t pagenum)
+{
+	int idx = buffer_find_page(table_id, pagenum);
+
+	// try_lock 에서 pin을 박았으므로 buffer에서 사라져서는 안됨
+	if (idx == -1) {
+		printf("Error: Tried to unlock latch of not exist page. Something goes wrong...");
+		exit(EXIT_FAILURE);
+	}
+
+	// 이 시점에서 buffer pool latch를 소유하고 있지 않기 때문에 pin을 조정하기 위한 mutex가 필요
+	buffer_pin_mtx.lock();
+	buffer[idx].is_pinned--;
+	buffer_pin_mtx.unlock();
+
+	buffer[idx].buffer_page_mtx.unlock();
+
+	// 이제부터 evict 되어도 됨
+	buffer_unpin_page(table_id, pagenum);
+
+	return;
+}
