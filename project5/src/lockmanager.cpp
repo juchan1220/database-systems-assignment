@@ -141,8 +141,10 @@ LockResult lock_record_lock(int table_id, pagenum_t pagenum, int64_t key, LockMo
 			continue;
 		}
 
-		conflictFlag = true;
-		conflictLock = lock_ptr;
+		if(!conflictFlag){
+			conflictFlag = true;
+			conflictLock = lock_ptr;
+		}
 
 		Transaction* trx_ptr = lock_ptr->trx;
 		while (true) {
@@ -168,8 +170,7 @@ LockResult lock_record_lock(int table_id, pagenum_t pagenum, int64_t key, LockMo
 		tmp->table_id = table_id;
 		tmp->page_num = pagenum;
 		tmp->key = key;
-		tmp->acquired = true;
-		tmp->trx = trxManager.trx_table[tid];
+ 		tmp->trx = trxManager.trx_table[tid];
 		tmp->mode = mode;
 		tmp->page_prev = nullptr;
 		tmp->page_next = tail;
@@ -196,7 +197,6 @@ LockResult lock_record_lock(int table_id, pagenum_t pagenum, int64_t key, LockMo
 	tmp->table_id = table_id;
 	tmp->page_num = pagenum;
 	tmp->key = key;
-	tmp->acquired = false;
 	tmp->trx = trxManager.trx_table[tid];
 	tmp->mode = mode;
 	tmp->page_prev = nullptr;
@@ -241,60 +241,27 @@ pagenum_t lock_buffer_page_lock(int table_id, int64_t key)
 	return pagenum;
 }
 
-bool lock_conflict_recheck(int table_id, pagenum_t pagenum, int64_t key, LockMode mode, int tid)
+bool lock_deadlock_check(int table_id, pagenum_t pagenum, int64_t key, Lock* start, int tid)
 {
-	bool conflictFlag = false;
-	Lock* conflictLock = nullptr, * lock_ptr, * tmp;
-
+	lockManager.waitlock_refresh_mtx.lock();
 	lockManager.lock_mtx.lock();
 
-	// Conflict가 일어났던 Transaction의 lock을 찾는다
-	lock_ptr = lockManager.lockTable[{table_id, pagenum}].second;
-	while (lock_ptr != nullptr) {
-		if (lock_ptr->key == key && lock_ptr->trx->trx_id == tid) break;
-		lock_ptr = lock_ptr->page_next;
-	}
+	Transaction* trx_ptr = start->trx;
 
-	// lock이 사라진 경우
-	if (lock_ptr == nullptr) {
-#ifdef DEBUG
-		printf("Error: Lock is gone?!\n");
-#endif
-		exit(EXIT_FAILURE);
-	}
-
-	tmp = lock_ptr;
-	while (lock_ptr != nullptr) {
-		if ((lock_ptr->key != key) ||
-			(mode == LockMode::MODE_SHARED && lock_ptr->mode == LockMode::MODE_SHARED) ||
-			(lock_ptr->trx->trx_id == tid)) {
-			lock_ptr = lock_ptr->page_next;
-			continue;
+	while (trx_ptr != nullptr) {
+		// DEADLOCK Detected
+		if (trx_ptr->trx_id == tid) {
+			lockManager.lock_mtx.unlock();
+			lockManager.waitlock_refresh_mtx.unlock();
+			return true;
 		}
 
-		conflictFlag = true;
-		conflictLock = lock_ptr;
-		break;
+		if (trx_ptr->trx_state != TransactionState::STATE_WAITING) break;
+		trx_ptr = trx_ptr->wait_lock->trx;
 	}
-
-	// No Conflict, No Deadlock
-	if (!conflictFlag) {
-		tmp->acquired = true;
-		tmp->trx->wait_lock = nullptr;
-
-		lockManager.lock_mtx.unlock();
-		return true;
-	}
-
-	// Conflict
-	tmp->acquired = false;
-
-	tmp->trx->wait_lock = conflictLock;
-	tmp->trx->trx_state = TransactionState::STATE_WAITING;
-	conflictLock->trx->wait_this_cnt++;
 
 	lockManager.lock_mtx.unlock();
-
+	lockManager.waitlock_refresh_mtx.unlock();
 	return false;
 }
 

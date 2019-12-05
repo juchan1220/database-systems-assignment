@@ -384,22 +384,37 @@ int db_find(int table_id, int64_t key, char* ret_val, int trx_id)
 
 			trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_RUNNING;
 			trxManager.trx_table[trx_id]->wait_lock->trx->wait_this_cnt--;
+
+			// 이것이 성립하는 이유는 wiki에 증명
+			Lock* before_waited_lock = trxManager.trx_table[trx_id]->wait_lock;
+			trxManager.trx_table[trx_id]->wait_lock = before_waited_lock->page_next;
 			
+			// 다른 트랜잭션도 wait_lock이 수정되도록
+			lck.unlock();
+
+			// buffer page latch
 			pagenum = lock_buffer_page_lock(table_id, key);
 
-			Lock* before_waited_lock = trxManager.trx_table[trx_id]->wait_lock;
-
-			// CONFLICT가 있는지 다시 확인
-			bool ret_recheck = lock_conflict_recheck(table_id, pagenum, key, LockMode::MODE_SHARED, trx_id);
-
-			// 이 Lock이 기다리고 있던 Trx를 기다리고 있던 Lock들의 wait_lock 재정리가 모두 끝났을 때
-			if (before_waited_lock->trx->wait_this_cnt == 0) {
-				before_waited_lock->trx->trx_cond.notify_all();
+			// SUCCESS, no conflict lock
+			if (trxManager.trx_table[trx_id]->wait_lock == nullptr) {
+				// acquired를 수정해야하나 전혀 사용하지 않기에 수정하지 않음
+				// 이 Lock이 기다리고 있던 Trx를 기다리고 있던 Lock들의 wait_lock 재정리가 모두 끝났을 때
+				if (before_waited_lock->trx->wait_this_cnt == 0) {
+					before_waited_lock->trx->trx_cond.notify_all();
+				}
+				break;
 			}
 
-			// 없으면 탈출
-			if (ret_recheck) break;
+			// Deadlock Checking, after all wait_lock is fixed
+			if (lock_deadlock_check(table_id, pagenum, key, trxManager.trx_table[trx_id]->wait_lock, trx_id)) {
+				buffer_page_unlock(table_id, pagenum);
+				lock_abort_trx(trx_id);
+				return 4;
+			}
 
+			// 다시 SLEEP
+			trxManager.trx_table[trx_id]->wait_lock->trx->wait_this_cnt++;
+			trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_WAITING;
 		} while (true);
 	}
 
@@ -426,6 +441,9 @@ int db_update(int table_id, int64_t key, char* values, int trx_id)
 
 	// not exist transaction
 	if (!lock_trx_exist(trx_id)) {
+#ifdef DEBUG
+		printf("db_find: Not Exist Transaction.\n");
+#endif
 		return 1;
 	}
 
@@ -433,6 +451,9 @@ int db_update(int table_id, int64_t key, char* values, int trx_id)
 
 	// table is not opened
 	if (buffer_is_table_opened(table_id) == 0) {
+#ifdef DEBUG
+		printf("db_find: table is not opened.\n");
+#endif
 		return 2;
 	}
 
@@ -459,10 +480,8 @@ int db_update(int table_id, int64_t key, char* values, int trx_id)
 
 	if (ret == LockResult::DEADLOCK) {
 		// Deadlock
-
 #ifdef DEBUG
-		printf("db_update: deadlock detected!\n");
-		fflush(stdout);
+		printf("db_find: deadlock detected.\n");
 #endif
 
 		buffer_page_unlock(table_id, pagenum);
@@ -478,22 +497,36 @@ int db_update(int table_id, int64_t key, char* values, int trx_id)
 
 			trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_RUNNING;
 			trxManager.trx_table[trx_id]->wait_lock->trx->wait_this_cnt--;
-			
+
+			// 이것이 성립하는 이유는 wiki에 증명
+			Lock* before_waited_lock = trxManager.trx_table[trx_id]->wait_lock;
+			trxManager.trx_table[trx_id]->wait_lock = before_waited_lock->page_next;
+
+			// 다른 트랜잭션도 wait_lock이 수정되도록
+			lck.unlock();
+
+			// buffer page latch
 			pagenum = lock_buffer_page_lock(table_id, key);
 
-			Lock* before_waited_lock = trxManager.trx_table[trx_id]->wait_lock;
-
-			// CONFLICT가 있는지 다시 확인
-			bool ret_recheck = lock_conflict_recheck(table_id, pagenum, key, LockMode::MODE_EXCLUSIVE, trx_id);
-			
-			// 이 Lock이 기다리고 있던 Trx를 기다리고 있던 Lock들의 wait_lock 재정리가 모두 끝났을 때
-			if (before_waited_lock->trx->wait_this_cnt == 0) {
-				before_waited_lock->trx->trx_cond.notify_all();
+			// SUCCESS, no conflict lock
+			if (trxManager.trx_table[trx_id]->wait_lock == nullptr) {
+				// 이 Lock이 기다리고 있던 Trx를 기다리고 있던 Lock들의 wait_lock 재정리가 모두 끝났을 때
+				if (before_waited_lock->trx->wait_this_cnt == 0) {
+					before_waited_lock->trx->trx_cond.notify_all();
+				}
+				break;
 			}
 
-			// 없으면 탈출
-			if (ret_recheck) break;
+			// Deadlock Checking, after all wait_lock is fixed
+			if (lock_deadlock_check(table_id, pagenum, key, trxManager.trx_table[trx_id]->wait_lock, trx_id)) {
+				buffer_page_unlock(table_id, pagenum);
+				lock_abort_trx(trx_id);
+				return 4;
+			}
 
+			// 다시 SLEEP
+			trxManager.trx_table[trx_id]->wait_lock->trx->wait_this_cnt++;
+			trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_WAITING;
 		} while (true);
 	}
 

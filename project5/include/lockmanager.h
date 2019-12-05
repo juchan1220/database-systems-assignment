@@ -69,8 +69,6 @@ struct Lock
 
 	// same page next lock
 	Lock* page_next;
-
-	bool acquired;
 };
 
 struct Transaction
@@ -129,7 +127,7 @@ LockResult lock_record_lock(int table_id, pagenum_t pagenum, int64_t key, LockMo
 
 pagenum_t lock_buffer_page_lock(int table_id, int64_t key);
 
-bool lock_conflict_recheck(int table_id, pagenum_t pagenum, int64_t key, LockMode mode, int tid);
+bool lock_deadlock_check(int table_id, pagenum_t pagenum, int64_t key, Lock* start, int tid);
 
 void lock_abort_trx(int tid);
 
