@@ -334,8 +334,6 @@ int db_find(int table_id, int64_t key, char* ret_val, int trx_id)
 		return 1;
 	}
 
-	trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_RUNNING;
-
 	// table is not opened
 	if (buffer_is_table_opened(table_id) == 0) {
 #ifdef DEBUG
@@ -344,6 +342,8 @@ int db_find(int table_id, int64_t key, char* ret_val, int trx_id)
 		return 2;
 	}
 
+	trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_RUNNING;
+
 	// Key Existence Check
 	{
 		buffer_pool_lock();
@@ -351,6 +351,7 @@ int db_find(int table_id, int64_t key, char* ret_val, int trx_id)
 		record* find_ret = find(key);
 		if (find_ret == nullptr) {
 			// not exist key
+			trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_IDLE;
 			return 3;
 		}
 		else {
@@ -381,6 +382,7 @@ int db_find(int table_id, int64_t key, char* ret_val, int trx_id)
 			buffer_page_unlock(table_id, pagenum);
 			std::unique_lock<std::mutex> lck(trxManager.trx_table[trx_id]->wait_lock->trx->trx_mtx);
 			trxManager.trx_table[trx_id]->wait_lock->trx->trx_cond.wait(lck);
+
 
 			trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_RUNNING;
 			trxManager.trx_table[trx_id]->wait_lock->trx->wait_this_cnt--;
@@ -447,8 +449,6 @@ int db_update(int table_id, int64_t key, char* values, int trx_id)
 		return 1;
 	}
 
-	trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_RUNNING;
-
 	// table is not opened
 	if (buffer_is_table_opened(table_id) == 0) {
 #ifdef DEBUG
@@ -457,6 +457,8 @@ int db_update(int table_id, int64_t key, char* values, int trx_id)
 		return 2;
 	}
 
+	trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_RUNNING;
+
 	// Key Existence Check
 	{
 		buffer_pool_lock();
@@ -464,6 +466,7 @@ int db_update(int table_id, int64_t key, char* values, int trx_id)
 		record* find_ret = find(key);
 		if (find_ret == nullptr) {
 			// not exist key
+			trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_IDLE;
 			return 3;
 		}
 		else {
@@ -501,6 +504,11 @@ int db_update(int table_id, int64_t key, char* values, int trx_id)
 			// 이것이 성립하는 이유는 wiki에 증명
 			Lock* before_waited_lock = trxManager.trx_table[trx_id]->wait_lock;
 			trxManager.trx_table[trx_id]->wait_lock = before_waited_lock->page_next;
+			
+			// 이 Lock이 기다리고 있던 Trx를 기다리고 있던 Lock들의 wait_lock 재정리가 모두 끝났을 때
+			if (before_waited_lock->trx->wait_this_cnt == 0) {
+				before_waited_lock->trx->trx_cond.notify_all();
+			}
 
 			// 다른 트랜잭션도 wait_lock이 수정되도록
 			lck.unlock();
@@ -510,19 +518,17 @@ int db_update(int table_id, int64_t key, char* values, int trx_id)
 
 			// SUCCESS, no conflict lock
 			if (trxManager.trx_table[trx_id]->wait_lock == nullptr) {
-				// 이 Lock이 기다리고 있던 Trx를 기다리고 있던 Lock들의 wait_lock 재정리가 모두 끝났을 때
-				if (before_waited_lock->trx->wait_this_cnt == 0) {
-					before_waited_lock->trx->trx_cond.notify_all();
-				}
 				break;
 			}
 
 			// Deadlock Checking, after all wait_lock is fixed
 			if (lock_deadlock_check(table_id, pagenum, key, trxManager.trx_table[trx_id]->wait_lock, trx_id)) {
+				fflush(stdout);
 				buffer_page_unlock(table_id, pagenum);
 				lock_abort_trx(trx_id);
 				return 4;
 			}
+			fflush(stdout);
 
 			// 다시 SLEEP
 			trxManager.trx_table[trx_id]->wait_lock->trx->wait_this_cnt++;

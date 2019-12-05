@@ -118,6 +118,9 @@ int func3(int thread_num)
 	printf("Thread3: end_trx\n");
 	fflush(stdout);
 	end_trx(tid);
+	printf("Thread3: end_trx Complete\n");
+	fflush(stdout);
+
 	delete[] buffer;
 
 	return 0;
