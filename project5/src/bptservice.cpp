@@ -408,12 +408,10 @@ int db_find(int table_id, int64_t key, char* ret_val, int trx_id)
 
 			// Deadlock Checking, after all wait_lock is fixed
 			if (lock_deadlock_check(table_id, pagenum, key, trxManager.trx_table[trx_id]->wait_lock, trx_id)) {
-				fflush(stdout);
 				buffer_page_unlock(table_id, pagenum);
 				lock_abort_trx(trx_id);
 				return 4;
 			}
-			fflush(stdout);
 
 			// 다시 SLEEP
 			trxManager.trx_table[trx_id]->wait_lock->trx->wait_this_cnt++;
@@ -524,12 +522,10 @@ int db_update(int table_id, int64_t key, char* values, int trx_id)
 
 			// Deadlock Checking, after all wait_lock is fixed
 			if (lock_deadlock_check(table_id, pagenum, key, trxManager.trx_table[trx_id]->wait_lock, trx_id)) {
-				fflush(stdout);
 				buffer_page_unlock(table_id, pagenum);
 				lock_abort_trx(trx_id);
 				return 4;
 			}
-			fflush(stdout);
 
 			// 다시 SLEEP
 			trxManager.trx_table[trx_id]->wait_lock->trx->wait_this_cnt++;
