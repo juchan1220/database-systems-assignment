@@ -30,7 +30,7 @@ int func1(int thread_num)
 	unique_lock<mutex> lck(deadlock_mtx);
 	printf("1 - S1 lock trying...\n");
 	ret = db_find(table_num, 1, buffer, tid);
-	printf("1 - S1 lock Ok\n");
+	printf("1 - S1 lock Ok : %s\n", buffer);
 
 	if (ret != 0) {
 		printf("db_find (trx) Failed.\n");
@@ -38,8 +38,10 @@ int func1(int thread_num)
 	}
 
 	printf("500 - s1 lock trying...\n");
+	fflush(stdout);
+
 	db_find(table_num, 500, buffer, tid);
-	printf("500 - S1 lock Ok\n");
+	printf("500 - S1 lock Ok: %s\n", buffer);
 
 	if (ret != 0) {
 		printf("db_find (trx) Failed.\n");
@@ -77,12 +79,22 @@ int func2(int thread_num)
 	sprintf(buffer, "NEWDATA_%04d", 500);
 	printf("500 - X2 lock trying...\n");
 	ret = db_update(table_num, 500, buffer, tid);
-	printf("500 - X2 lock complete!\n");
 
 	if (ret != 0) {
 		printf("db_update (trx) Failed.\n");
 		exit(EXIT_FAILURE);
 	}
+	printf("500 - X2 lock complete!: ");
+	
+	
+	ret = db_find(table_num, 500, buffer, tid);
+	if (ret != 0) {
+		printf("func2 db_find failed...");
+		exit(EXIT_FAILURE);
+	}
+
+	printf("%s\n", buffer);
+
 
 	printf("Sleep for thread1...\n");
 	fflush(stdout);
@@ -91,6 +103,7 @@ int func2(int thread_num)
 
 	sprintf(buffer, "NEWDATA_%04d", 1);
 	printf("1 - X2 lock trying...\n");
+	fflush(stdout);
 	ret = db_update(table_num, 1, buffer, tid);
 	printf("1 - X2 lock complete!\n");
 

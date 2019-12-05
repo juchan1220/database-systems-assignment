@@ -367,7 +367,9 @@ int db_find(int table_id, int64_t key, char* ret_val, int trx_id)
 
 	if (ret == LockResult::DEADLOCK) {
 		// Deadlock
+#ifdef DEBUG
 		printf("db_find: deadlock detected.\n");
+#endif
 
 		buffer_page_unlock(table_id, pagenum);
 
@@ -460,6 +462,7 @@ int db_update(int table_id, int64_t key, char* values, int trx_id)
 
 #ifdef DEBUG
 		printf("db_update: deadlock detected!\n");
+		fflush(stdout);
 #endif
 
 		buffer_page_unlock(table_id, pagenum);
@@ -498,7 +501,15 @@ int db_update(int table_id, int64_t key, char* values, int trx_id)
 
 	for (int i = 0; i < page->num_keys; i++) {
 		if (page->keys[i] == key) {
+			Undo tmpUndo;
+
+			tmpUndo.table_id = table_id;
+			tmpUndo.key = key;
+			tmpUndo.oldValue = new record;
+			memcpy(tmpUndo.oldValue, ((record*)(page->pointers)) + i, sizeof(record));
 			memcpy(&(((record*)(page->pointers))[i].value), values, VALUE_SIZE);
+
+			trxManager.trx_table[trx_id]->undo_list.push_back(tmpUndo);
 			break;
 		}
 	}

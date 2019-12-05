@@ -25,8 +25,6 @@ int lock_alloc_trx()
 	trxManager.trx_table[ret] = new Transaction(ret);
 	trxManager.trx_mtx.unlock();
 
-	printf("Transacntion begin: %d\n", ret);
-
     return ret;
 }
 
@@ -295,7 +293,6 @@ void lock_abort_trx(int tid)
 {
 	for (auto& undo :trxManager.trx_table[tid]->undo_list) {
 		pagenum_t pagenum = lock_buffer_page_lock(undo.table_id, undo.key);
-		buffer_pool_unlock();
 
 		page_t* page = buffer_read_page(undo.table_id, pagenum);
 
