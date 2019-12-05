@@ -105,6 +105,7 @@ struct LockManager
 	std::unordered_map<ptp, std::pair<Lock*, Lock*>, ptpHasher> lockTable;
 
 	std::mutex lock_mtx;
+	std::mutex waitlock_refresh_mtx;
 };
 
 extern TransactionManager trxManager;

@@ -34,7 +34,8 @@ int lock_delete_trx(int tid)
 	if (trxManager.trx_table.find(tid) == trxManager.trx_table.end()) {
 		return 0;
 	}
-
+	
+	lockManager.waitlock_refresh_mtx.lock();
 	lockManager.lock_mtx.lock();
 
 	trxManager.trx_table[tid]->trx_state = TransactionState::STATE_IDLE;
@@ -68,9 +69,11 @@ int lock_delete_trx(int tid)
 	for (auto lock_ptr : trxManager.trx_table[tid]->acquired_locks)
 		delete lock_ptr;
 	delete trxManager.trx_table[tid];
+
 	trxManager.trx_table.erase(tid);
 
 	trxManager.trx_mtx.unlock();
+	lockManager.waitlock_refresh_mtx.unlock();
 
 	return tid;
 }
@@ -86,6 +89,7 @@ LockResult lock_record_lock(int table_id, pagenum_t pagenum, int64_t key, LockMo
 {
 	Lock *tail, *lock_ptr;
 
+	lockManager.waitlock_refresh_mtx.lock();
 	lockManager.lock_mtx.lock();
 
 	// existence check
@@ -120,6 +124,7 @@ LockResult lock_record_lock(int table_id, pagenum_t pagenum, int64_t key, LockMo
 	// 이미 같은 트랜잭션에서 Lock을 가지고 있는 경우, 새로 걸지 않고 진행
 	if (hasLock) {
 		lockManager.lock_mtx.unlock();
+		lockManager.waitlock_refresh_mtx.unlock();
 		return LockResult::SUCCESS;
 	}
 
@@ -144,6 +149,7 @@ LockResult lock_record_lock(int table_id, pagenum_t pagenum, int64_t key, LockMo
 			// DEADLOCK Detected
 			if (trx_ptr->trx_id == tid) {
 				lockManager.lock_mtx.unlock();
+				lockManager.waitlock_refresh_mtx.unlock();
 				return LockResult::DEADLOCK;
 			}
 
@@ -177,8 +183,10 @@ LockResult lock_record_lock(int table_id, pagenum_t pagenum, int64_t key, LockMo
 		}
 
 		tmp->trx->acquired_locks.push_back(tmp);
+		tmp->trx->wait_lock = nullptr;
 
 		lockManager.lock_mtx.unlock();
+		lockManager.waitlock_refresh_mtx.unlock();
 		return LockResult::SUCCESS;
 	}
 
@@ -195,14 +203,15 @@ LockResult lock_record_lock(int table_id, pagenum_t pagenum, int64_t key, LockMo
 	tmp->page_next = tail;
 	if(tail != nullptr) tail->page_prev = tmp;
 
-	trxManager.trx_table[tid]->wait_lock = conflictLock;
-	trxManager.trx_table[tid]->trx_state = TransactionState::STATE_WAITING;
+	tmp->trx->wait_lock = conflictLock;
+	tmp->trx->trx_state = TransactionState::STATE_WAITING;
 	tmp->trx->acquired_locks.push_back(tmp);
 	conflictLock->trx->wait_this_cnt++;
 
 	lockManager.lockTable[{table_id, pagenum}].second = tmp;
 
 	lockManager.lock_mtx.unlock();
+	lockManager.waitlock_refresh_mtx.unlock();
 
 	return LockResult::CONFLICT;
 }
@@ -280,8 +289,8 @@ bool lock_conflict_recheck(int table_id, pagenum_t pagenum, int64_t key, LockMod
 	// Conflict
 	tmp->acquired = false;
 
-	trxManager.trx_table[tid]->wait_lock = conflictLock;
-	trxManager.trx_table[tid]->trx_state = TransactionState::STATE_WAITING;
+	tmp->trx->wait_lock = conflictLock;
+	tmp->trx->trx_state = TransactionState::STATE_WAITING;
 	conflictLock->trx->wait_this_cnt++;
 
 	lockManager.lock_mtx.unlock();
