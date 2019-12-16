@@ -325,6 +325,8 @@ int end_trx(int tid)
 int db_find(int table_id, int64_t key, char* ret_val, int trx_id)
 {
 	pagenum_t pagenum;
+	
+	select_table(table_id);
 
 	// not exist transaction
 	if (!lock_trx_exist(trx_id)) {
@@ -386,16 +388,16 @@ int db_find(int table_id, int64_t key, char* ret_val, int trx_id)
 			trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_RUNNING;
 			trxManager.trx_table[trx_id]->wait_lock->trx->wait_this_cnt--;
 
-			// ÀÌ°ÍÀÌ ¼º¸³ÇÏ´Â ÀÌÀ¯´Â wiki¿¡ Áõ¸í
+			// ì´ê²ƒì´ ì„±ë¦½í•˜ëŠ” ì´ìœ ëŠ” wikiì— ì¦ëª…
 			Lock* before_waited_lock = trxManager.trx_table[trx_id]->wait_lock;
 			trxManager.trx_table[trx_id]->wait_lock = before_waited_lock->page_next;
 
-			// ÀÌ LockÀÌ ±â´Ù¸®°í ÀÖ´ø Trx¸¦ ±â´Ù¸®°í ÀÖ´ø LockµéÀÇ wait_lock ÀçÁ¤¸®°¡ ¸ðµÎ ³¡³µÀ» ¶§
+			// ì´ Lockì´ ê¸°ë‹¤ë¦¬ê³  ìžˆë˜ Trxë¥¼ ê¸°ë‹¤ë¦¬ê³  ìžˆë˜ Lockë“¤ì˜ wait_lock ìž¬ì •ë¦¬ê°€ ëª¨ë‘ ëë‚¬ì„ ë•Œ
 			if (before_waited_lock->trx->wait_this_cnt == 0) {
 				before_waited_lock->trx->trx_cond.notify_all();
 			}
 
-			// ´Ù¸¥ Æ®·£Àè¼Çµµ wait_lockÀÌ ¼öÁ¤µÇµµ·Ï
+			// ë‹¤ë¥¸ íŠ¸ëžœìž­ì…˜ë„ wait_lockì´ ìˆ˜ì •ë˜ë„ë¡
 			lck.unlock();
 
 			// buffer page latch
@@ -413,7 +415,7 @@ int db_find(int table_id, int64_t key, char* ret_val, int trx_id)
 				return 4;
 			}
 
-			// ´Ù½Ã SLEEP
+			// ë‹¤ì‹œ SLEEP
 			trxManager.trx_table[trx_id]->wait_lock->trx->wait_this_cnt++;
 			trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_WAITING;
 		} while (true);
@@ -439,6 +441,9 @@ int db_find(int table_id, int64_t key, char* ret_val, int trx_id)
 int db_update(int table_id, int64_t key, char* values, int trx_id)
 {
 	pagenum_t pagenum;
+	
+	select_table(table_id);
+
 
 	// not exist transaction
 	if (!lock_trx_exist(trx_id)) {
@@ -500,16 +505,16 @@ int db_update(int table_id, int64_t key, char* values, int trx_id)
 			trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_RUNNING;
 			trxManager.trx_table[trx_id]->wait_lock->trx->wait_this_cnt--;
 
-			// ÀÌ°ÍÀÌ ¼º¸³ÇÏ´Â ÀÌÀ¯´Â wiki¿¡ Áõ¸í
+			// ì´ê²ƒì´ ì„±ë¦½í•˜ëŠ” ì´ìœ ëŠ” wikiì— ì¦ëª…
 			Lock* before_waited_lock = trxManager.trx_table[trx_id]->wait_lock;
 			trxManager.trx_table[trx_id]->wait_lock = before_waited_lock->page_next;
 			
-			// ÀÌ LockÀÌ ±â´Ù¸®°í ÀÖ´ø Trx¸¦ ±â´Ù¸®°í ÀÖ´ø LockµéÀÇ wait_lock ÀçÁ¤¸®°¡ ¸ðµÎ ³¡³µÀ» ¶§
+			// ì´ Lockì´ ê¸°ë‹¤ë¦¬ê³  ìžˆë˜ Trxë¥¼ ê¸°ë‹¤ë¦¬ê³  ìžˆë˜ Lockë“¤ì˜ wait_lock ìž¬ì •ë¦¬ê°€ ëª¨ë‘ ëë‚¬ì„ ë•Œ
 			if (before_waited_lock->trx->wait_this_cnt == 0) {
 				before_waited_lock->trx->trx_cond.notify_all();
 			}
 
-			// ´Ù¸¥ Æ®·£Àè¼Çµµ wait_lockÀÌ ¼öÁ¤µÇµµ·Ï
+			// ë‹¤ë¥¸ íŠ¸ëžœìž­ì…˜ë„ wait_lockì´ ìˆ˜ì •ë˜ë„ë¡
 			lck.unlock();
 
 			// buffer page latch
@@ -527,7 +532,7 @@ int db_update(int table_id, int64_t key, char* values, int trx_id)
 				return 4;
 			}
 
-			// ´Ù½Ã SLEEP
+			// ë‹¤ì‹œ SLEEP
 			trxManager.trx_table[trx_id]->wait_lock->trx->wait_this_cnt++;
 			trxManager.trx_table[trx_id]->trx_state = TransactionState::STATE_WAITING;
 		} while (true);
