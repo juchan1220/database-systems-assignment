@@ -466,10 +466,6 @@ void buffer_set_dirty_page(int table_id, pagenum_t pagenum)
 #endif
 		exit(EXIT_FAILURE);
 	}
-	// Special Case: Header
-	if (pagenum == 0) {
-		return;
-	}
 
 	int idx = buffer_find_page(table_id, pagenum);
 
